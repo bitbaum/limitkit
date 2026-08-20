@@ -1,0 +1,36 @@
+# GOLDEN CI FLOOR — npm. See maonakamoto/dotfiles templates/ci/README.md.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # SSOT: "verified" is defined ONCE, in package.json `verify`
+      # (= lint + typecheck + build + test), and run identically here and
+      # locally. The tests import the package BY NAME, so this also exercises
+      # the `exports` map — a broken one fails here, not at a consumer's
+      # install.
+      - name: Verify
+        run: npm run verify
