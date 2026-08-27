@@ -3,7 +3,7 @@
 Rate limiting as a **decision**, not a middleware.
 
 ```bash
-npm install github:maonakamoto/limitkit#v0.1.0
+npm install github:catomean/limitkit#v0.1.0
 ```
 
 ## Why this exists
