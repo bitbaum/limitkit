@@ -1,6 +1,6 @@
 {
   "name": "limitkit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Rate limiting as a decision, not a middleware: fixed and sliding windows over an injectable store, a bounded in-memory store, standard RateLimit headers, and client-IP extraction. No HTTP client, no framework.",
   "license": "MIT",
   "author": "Mao Nakamoto",
