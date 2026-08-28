@@ -71,12 +71,14 @@ because the store holds and the algorithm decides.
   `Retry-After` on refusals only. A plain object you spread into your own
   response; constructing a `Response` would mean choosing your framework for
   you.
-- **`clientIp(headers)`** — first `x-forwarded-for` hop, then `x-real-ip`, then
-  `"unknown"`. Only as honest as the proxy in front of you; the `"unknown"`
-  fallback throttles anonymous traffic collectively rather than throwing.
-
-## Deliberately not included
-
+- **`clientIp(headers, { trustedProxies = 1 })`** — the forwarded hop your own
+  proxy wrote, then `x-real-ip`, then `"unknown"`. A proxy **appends** to
+  `X-Forwarded-For`, so the header reads `<what the client sent>, <what the
+  proxy saw>` and only the **last** entry is unforgeable. Reading the first
+  one — which this did before v0.2.0 — lets a caller vary the header per
+  request, mint a fresh bucket each time and never trip the limit at all.
+  Set `trustedProxies: 2` when a CDN sits in front of your proxy, or `0` when
+  the server is exposed directly and no forwarded header can be believed.
 - **No HTTP client, no middleware, no framework types** — the package supplies
   the decision; your app keeps its conventions.
 - **No limit values** — how many attempts a login route allows is app
