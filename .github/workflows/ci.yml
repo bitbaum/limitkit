@@ -1,4 +1,4 @@
-# GOLDEN CI FLOOR — npm. See catomean/dotfiles templates/ci/README.md.
+# GOLDEN CI FLOOR — npm. See bitbaum/fleet templates/ci/README.md.
 name: CI
 
 on:
