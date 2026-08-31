@@ -66,10 +66,7 @@ export type HeadersLike = { get(name: string): string | null };
  * throttles the anonymous bucket collectively, which is the right failure mode
  * for the abuse this exists to blunt.
  */
-export function clientIp(
-  headers: HeadersLike,
-  opts: { trustedProxies?: number } = {},
-): string {
+export function clientIp(headers: HeadersLike, opts: { trustedProxies?: number } = {}): string {
   const trusted = opts.trustedProxies ?? 1;
   if (trusted > 0) {
     const hops = (headers.get("x-forwarded-for") ?? "")

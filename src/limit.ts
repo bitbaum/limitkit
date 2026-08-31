@@ -69,8 +69,7 @@ function decide(
   const live = hits.filter((t) => t > now - rule.windowMs);
   const allowed = live.length < rule.limit;
   const oldest = live[0];
-  const resetAt =
-    live.length === 0 ? now : (oldest ?? now) + rule.windowMs;
+  const resetAt = live.length === 0 ? now : (oldest ?? now) + rule.windowMs;
   return {
     allowed,
     result: {
@@ -78,9 +77,7 @@ function decide(
       limit: rule.limit,
       remaining: Math.max(0, rule.limit - live.length - (allowed ? 1 : 0)),
       resetAt,
-      retryAfterSeconds: allowed
-        ? 0
-        : Math.max(1, Math.ceil((resetAt - now) / 1000)),
+      retryAfterSeconds: allowed ? 0 : Math.max(1, Math.ceil((resetAt - now) / 1000)),
     },
   };
 }
