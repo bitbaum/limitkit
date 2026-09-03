@@ -93,7 +93,7 @@ replaces, collectively, had almost none.
 ## Development
 
 ```bash
-npm run verify   # lint + typecheck + build + test (tests import by package name)
+pnpm run verify  # lint + typecheck + build + test (tests import by package name)
 ```
 
 MIT.
