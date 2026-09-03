@@ -1,4 +1,4 @@
-# GOLDEN CI FLOOR — npm. See bitbaum/fleet templates/ci/README.md.
+# GOLDEN CI FLOOR — pnpm. See bitbaum/fleet templates/ci/README.md.
 name: CI
 
 on:
@@ -19,13 +19,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # pnpm version comes from "packageManager" in package.json (SSOT);
+      # pnpm/action-setup@v6 errors if both are specified.
+      - uses: pnpm/action-setup@v6
+
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-          cache: npm
+          cache: pnpm
 
       - name: Install
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       # SSOT: "verified" is defined ONCE, in package.json `verify`
       # (= lint + typecheck + build + test), and run identically here and
@@ -33,4 +37,4 @@ jobs:
       # the `exports` map — a broken one fails here, not at a consumer's
       # install.
       - name: Verify
-        run: npm run verify
+        run: pnpm run verify
