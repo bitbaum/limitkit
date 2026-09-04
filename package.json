@@ -4,13 +4,13 @@
   "description": "Rate limiting as a decision, not a middleware: fixed and sliding windows over an injectable store, a bounded in-memory store, standard RateLimit headers, and client-IP extraction. No HTTP client, no framework.",
   "license": "MIT",
   "author": "Mao Nakamoto",
-  "homepage": "https://github.com/catomean/limitkit#readme",
+  "homepage": "https://github.com/bitbaum/limitkit#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/catomean/limitkit.git"
+    "url": "git+https://github.com/bitbaum/limitkit.git"
   },
   "bugs": {
-    "url": "https://github.com/catomean/limitkit/issues"
+    "url": "https://github.com/bitbaum/limitkit/issues"
   },
   "keywords": [
     "rate-limit",
