@@ -1,0 +1,114 @@
+name: Publish
+
+# Publishing is driven by a version tag, so the released artifact is always
+# traceable to a commit. `npm version` creates the tag; pushing it ships.
+#
+# Auth is npm Trusted Publishing (OIDC): npmjs.com trusts exactly THIS
+# workflow in THIS repo. No token exists anywhere — nothing to store, leak, or
+# rotate — and provenance is attested on the registry. `npm publish`
+# (npm >= 11.5) exchanges the id-token itself. Copied from speechkit (which copied ai-kit).
+#
+# NOT YET BOOTSTRAPPED. npm cannot trust a publisher for a package that does
+# not exist, and the account's second factor is a passkey only a human holds,
+# so the FIRST publish is manual (see README → "npm"). Until then every tag
+# would fail here — a red run that means nothing is wrong. So the job checks
+# the repo variable NPM_PUBLISHING and skips GREEN, saying why, unless it is
+# "on". Set it after the bootstrap:  gh variable set NPM_PUBLISHING -b on
+on:
+  push:
+    tags: ["v*"]
+
+# Publishing is idempotent: the job first asks the registry whether
+# package.json's version already exists and skips (green) if it does. A
+# re-pushed tag, a re-run, or two runs for the same version cannot paint a
+# spurious E403 red — a red run that means "nothing is wrong" trains everyone
+# to ignore the workflow (bip-kit 0.2.6 and 0.2.7, 2026-09-11). Runs are also
+# serialised so two cannot race past the check; never cancelled, because a
+# cancelled publish is a half-shipped release.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    if: vars.NPM_PUBLISHING == 'on'
+    permissions:
+      contents: read
+      # Required for npm provenance — proves on the registry that this tarball
+      # was built by this workflow from this commit.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # pnpm version comes from "packageManager" in package.json (SSOT).
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Is this version already on the registry?
+        id: check
+        run: |
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "→ $name@$version is already published; nothing to do."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "✅ \`$name@$version\` is already published — nothing to do." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "→ $name@$version is not on the registry; releasing it."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.check.outputs.publish == 'true'
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # Never publish something that would not have passed CI.
+      - if: steps.check.outputs.publish == 'true'
+        run: pnpm run verify
+
+      # Refuse to publish a tag whose version does not match package.json,
+      # rather than silently shipping the wrong number.
+      - name: Check tag matches package version
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "Tag v$tag does not match package.json version $pkg" >&2
+            exit 1
+          fi
+
+      # npm >= 11.5 exchanges the OIDC id-token itself — no secret involved.
+      - name: Publish to npm (OIDC, tokenless)
+        if: steps.check.outputs.publish == 'true'
+        env:
+          NAME: ${{ steps.check.outputs.name }}
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          if npm publish; then
+            echo "🚀 Published \`$NAME@$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
+          elif npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            # The check above and this publish are not atomic. If another run
+            # slipped between them, the version is on the registry — which is
+            # the goal state, not an error.
+            echo "→ $NAME@$VERSION was published by a concurrent run; nothing to do."
+            echo "✅ \`$NAME@$VERSION\` was published by a concurrent run — nothing to do." >> "$GITHUB_STEP_SUMMARY"
+          else
+            exit 1
+          fi
+
+  # Present only so a tag before the bootstrap reads as a decision, not a
+  # silent no-op: the run is green and its summary says what to do.
+  not-yet:
+    runs-on: ubuntu-latest
+    if: vars.NPM_PUBLISHING != 'on'
+    steps:
+      - run: |
+          echo "npm publishing is not bootstrapped for this repo yet — nothing published." >> "$GITHUB_STEP_SUMMARY"
+          echo "Consumers install from git meanwhile: pnpm add github:bitbaum/limitkit#${GITHUB_REF_NAME}" >> "$GITHUB_STEP_SUMMARY"
