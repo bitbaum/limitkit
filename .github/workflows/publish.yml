@@ -1,30 +1,45 @@
+# prettier-ignore
 name: Publish
 
-# Publishing is driven by a version tag, so the released artifact is always
-# traceable to a commit. `npm version` creates the tag; pushing it ships.
+# The same file in every @bitbaum package. A merged version bump releases
+# itself; so does a pushed v* tag, and "Run workflow" re-tries by hand.
 #
-# Auth is npm Trusted Publishing (OIDC): npmjs.com trusts exactly THIS
-# workflow in THIS repo. No token exists anywhere — nothing to store, leak, or
-# rotate — and provenance is attested on the registry. `npm publish`
-# (npm >= 11.5) exchanges the id-token itself. Copied from speechkit (which copied ai-kit).
+# Two ways to npm, picked per run:
 #
-# NOT YET BOOTSTRAPPED. npm cannot trust a publisher for a package that does
-# not exist, and the account's second factor is a passkey only a human holds,
-# so the FIRST publish is manual (see README → "npm"). Until then every tag
-# would fail here — a red run that means nothing is wrong. So the job checks
-# the repo variable NPM_PUBLISHING and skips GREEN, saying why, unless it is
-# "on". Set it after the bootstrap:  gh variable set NPM_PUBLISHING -b on
+# - The package is already on npm → tokenless. npmjs.com trusts exactly THIS
+#   workflow in THIS repo (Trusted Publishing, OIDC): no token exists, nothing
+#   to leak or rotate, and every release carries a signed provenance statement.
+#
+# - The package is NOT on npm yet → npm will not trust a publisher for a
+#   package that does not exist, so the first version needs the account once.
+#   Put a short-lived npm token in the org secret NPM_BOOTSTRAP_TOKEN (made on
+#   npmjs.com from a phone; see docs in bitbaum/fleet) and this job publishes
+#   the first version with it. Without the token it skips GREEN and says so, so
+#   a new package never paints CI red.
+#   NOTE (npm docs, `npm trust`): trust commands do NOT accept a granular token,
+#   not even one with "bypass 2FA" — they need the account's interactive 2FA.
+#   So the auto-link step below is best-effort and is EXPECTED to fall through
+#   to the printed fallback. The human step is then ONE form per package on
+#   npmjs.com (repo + "publish.yml"), or one local `npm trust` loop
+#   (bootstrap-local.sh, step 2). After that, every release is tokenless.
+#
+# Publishing is idempotent: a version already on the registry is a green
+# no-op, so re-runs and repeat merges are harmless.
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+  # The auto-merge sweep re-arms this after a GITHUB_TOKEN merge, which
+  # starts no push workflow on its own (rearm_workflows in auto-merge.yml).
+  workflow_dispatch:
+    inputs:
+      diagnose_auth:
+        description: Test the npm trusted-publisher link without publishing anything.
+        type: boolean
+        default: false
 
-# Publishing is idempotent: the job first asks the registry whether
-# package.json's version already exists and skips (green) if it does. A
-# re-pushed tag, a re-run, or two runs for the same version cannot paint a
-# spurious E403 red — a red run that means "nothing is wrong" trains everyone
-# to ignore the workflow (bip-kit 0.2.6 and 0.2.7, 2026-09-11). Runs are also
-# serialised so two cannot race past the check; never cancelled, because a
-# cancelled publish is a half-shipped release.
+# Never two at once, never cancelled: a cancelled publish is a half-shipped
+# release.
 concurrency:
   group: publish
   cancel-in-progress: false
@@ -32,11 +47,11 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    if: vars.NPM_PUBLISHING == 'on'
     permissions:
-      contents: read
-      # Required for npm provenance — proves on the registry that this tarball
-      # was built by this workflow from this commit.
+      # write: tag the released commit v<version> when the release came from
+      # main rather than from a pushed tag.
+      contents: write
+      # Required for OIDC publishing and npm provenance.
       id-token: write
     steps:
       - uses: actions/checkout@v7
@@ -44,29 +59,79 @@ jobs:
       # pnpm version comes from "packageManager" in package.json (SSOT).
       - uses: pnpm/action-setup@v6
 
+      # No registry-url: setup-node would write an _authToken line that makes
+      # npm skip the OIDC exchange whenever no token is set.
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-          registry-url: "https://registry.npmjs.org"
 
-      - name: Is this version already on the registry?
+      # Trusted publishing and `npm trust` need npm >= 11.10; do not trust
+      # whatever the runner's Node happens to bundle.
+      - run: npm install -g npm@11
+
+      # "Run workflow" with diagnose_auth ticked asks npm whether it trusts
+      # THIS workflow for this package, and publishes nothing. HTTP 200 =
+      # linked; 404 = the one form on npmjs.com is still to be filled in. The
+      # response body holds a short-lived token, so it is never printed.
+      - name: Is the npm trusted publisher linked? (no publish)
+        if: inputs.diagnose_auth == true
+        run: |
+          node --input-type=module <<'NODE'
+          const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+          url.searchParams.set('audience', 'npm:registry.npmjs.org');
+          const identity = await fetch(url, {
+            headers: { authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
+            signal: AbortSignal.timeout(30000),
+          });
+          if (!identity.ok) throw new Error(`GitHub OIDC request failed: HTTP ${identity.status}`);
+          const { value: jwt } = await identity.json();
+          const claims = JSON.parse(Buffer.from(jwt.split('.')[1], 'base64url'));
+          console.log('Publisher identity:', JSON.stringify({ repository: claims.repository, workflow_ref: claims.workflow_ref, ref: claims.ref }));
+          const name = JSON.parse(await (await import('node:fs/promises')).readFile('package.json', 'utf8')).name;
+          const exchange = await fetch(`https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/${encodeURIComponent(name)}`, {
+            method: 'POST', headers: { authorization: `Bearer ${jwt}` },
+            signal: AbortSignal.timeout(30000),
+          });
+          console.log(`npm trust exchange for ${name}: HTTP ${exchange.status}`);
+          await exchange.body?.cancel();
+          if (!exchange.ok) throw new Error('npm does not trust this workflow for this package yet');
+          NODE
+
+      - name: What does npm have?
         id: check
+        if: inputs.diagnose_auth != true
+        env:
+          BOOTSTRAP: ${{ secrets.NPM_BOOTSTRAP_TOKEN != '' }}
         run: |
           name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           if npm view "$name@$version" version >/dev/null 2>&1; then
-            echo "→ $name@$version is already published; nothing to do."
             echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "✅ \`$name@$version\` is already published — nothing to do." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "→ $name@$version is not on the registry; releasing it."
+            echo "✅ \`$name@$version\` is already on npm — nothing to do." >> "$GITHUB_STEP_SUMMARY"
+          elif npm view "$name" version >/dev/null 2>&1; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "mode=oidc" >> "$GITHUB_OUTPUT"
+          elif [ "$BOOTSTRAP" = "true" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "mode=first" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "⏸ \`$name\` is not on npm yet, and its first version needs the account once."
+              echo "Add the org secret NPM_BOOTSTRAP_TOKEN (a short-lived npm token) and run this workflow again."
+              echo "Meanwhile it installs from GitHub: \`pnpm add github:${GITHUB_REPOSITORY}\`"
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - if: steps.check.outputs.publish == 'true'
         run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # verify includes the real-browser test (test/browser.mjs) where a
+      # package has one; without the browser it fails before reaching npm.
+      - if: steps.check.outputs.publish == 'true' && hashFiles('test/browser.mjs') != ''
+        run: pnpm exec playwright install --with-deps chromium
 
       # Never publish something that would not have passed CI.
       - if: steps.check.outputs.publish == 'true'
@@ -75,7 +140,7 @@ jobs:
       # Refuse to publish a tag whose version does not match package.json,
       # rather than silently shipping the wrong number.
       - name: Check tag matches package version
-        if: steps.check.outputs.publish == 'true'
+        if: steps.check.outputs.publish == 'true' && github.ref_type == 'tag'
         run: |
           tag="${GITHUB_REF_NAME#v}"
           pkg=$(node -p "require('./package.json').version")
@@ -84,31 +149,52 @@ jobs:
             exit 1
           fi
 
-      # npm >= 11.5 exchanges the OIDC id-token itself — no secret involved.
-      - name: Publish to npm (OIDC, tokenless)
+      - name: Publish to npm
         if: steps.check.outputs.publish == 'true'
         env:
           NAME: ${{ steps.check.outputs.name }}
           VERSION: ${{ steps.check.outputs.version }}
+          MODE: ${{ steps.check.outputs.mode }}
+          FIRST_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
-          if npm publish; then
+          if [ "$MODE" = "first" ]; then
+            # The one token-based publish in a package's life.
+            echo "//registry.npmjs.org/:_authToken=${FIRST_TOKEN}" > "$RUNNER_TEMP/.npmrc"
+            export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/.npmrc"
+          fi
+          if npm publish --access public --provenance; then
             echo "🚀 Published \`$NAME@$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
           elif npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
-            # The check above and this publish are not atomic. If another run
-            # slipped between them, the version is on the registry — which is
-            # the goal state, not an error.
-            echo "→ $NAME@$VERSION was published by a concurrent run; nothing to do."
-            echo "✅ \`$NAME@$VERSION\` was published by a concurrent run — nothing to do." >> "$GITHUB_STEP_SUMMARY"
+            # Another run slipped in between the check and this publish: the
+            # version is on the registry, which is the goal state.
+            echo "✅ \`$NAME@$VERSION\` was published by a concurrent run." >> "$GITHUB_STEP_SUMMARY"
           else
             exit 1
           fi
+          if [ "$MODE" = "first" ]; then
+            # From now on this workflow publishes without any token.
+            if npm trust github "$NAME" --file publish.yml --repo "$GITHUB_REPOSITORY" --allow-publish --yes; then
+              echo "🔗 Linked \`$NAME\` to this workflow — later releases need no token." >> "$GITHUB_STEP_SUMMARY"
+            else
+              {
+                echo "⚠️ Published. npm does not let a token link the workflow (expected)."
+                echo "Link it once on https://www.npmjs.com/package/$NAME/access → Trusted Publisher → GitHub Actions:"
+                echo "repository \`$GITHUB_REPOSITORY\`, workflow \`publish.yml\`, tick *Allow npm publish*."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          rm -f "$RUNNER_TEMP/.npmrc"
 
-  # Present only so a tag before the bootstrap reads as a decision, not a
-  # silent no-op: the run is green and its summary says what to do.
-  not-yet:
-    runs-on: ubuntu-latest
-    if: vars.NPM_PUBLISHING != 'on'
-    steps:
-      - run: |
-          echo "npm publishing is not bootstrapped for this repo yet — nothing published." >> "$GITHUB_STEP_SUMMARY"
-          echo "Consumers install from git meanwhile: pnpm add github:bitbaum/limitkit#${GITHUB_REF_NAME}" >> "$GITHUB_STEP_SUMMARY"
+      # A release from main gets its tag here, so every published version is
+      # still traceable to a commit by name.
+      - name: Tag the released commit
+        if: steps.check.outputs.publish == 'true' && github.ref_type != 'tag'
+        env:
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null; then
+            echo "→ v$VERSION already tagged."
+          else
+            git tag "v$VERSION" "$GITHUB_SHA"
+            git push origin "v$VERSION"
+          fi
