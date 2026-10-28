@@ -3,7 +3,7 @@
 Rate limiting as a **decision**, not a middleware.
 
 ```bash
-pnpm add github:bitbaum/limitkit#v0.2.0
+pnpm add limitkit
 ```
 
 ## Why this exists
