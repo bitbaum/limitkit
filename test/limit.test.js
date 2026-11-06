@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { slidingWindow, fixedWindow, MemoryStore } from "limitkit";
+import { slidingWindow, fixedWindow, MemoryStore } from "@bitbaum/limitkit";
 
 const RULE = { limit: 3, windowMs: 60_000 };
 const T0 = 1_000_000;

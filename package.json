@@ -1,5 +1,5 @@
 {
-  "name": "limitkit",
+  "name": "@bitbaum/limitkit",
   "version": "0.2.1",
   "description": "Rate limiting as a decision, not a middleware: fixed and sliding windows over an injectable store, a bounded in-memory store, standard RateLimit headers, and client-IP extraction. No HTTP client, no framework.",
   "license": "MIT",
