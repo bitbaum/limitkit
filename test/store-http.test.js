@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { MemoryStore, slidingWindow, toHeaders, clientIp } from "limitkit";
+import { MemoryStore, slidingWindow, toHeaders, clientIp } from "@bitbaum/limitkit";
 
 test("THE STORE IS BOUNDED — stranger keys cannot grow the process forever", () => {
   // The bug this makes impossible: one replaced implementation kept a bare

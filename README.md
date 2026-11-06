@@ -1,9 +1,9 @@
-# limitkit
+# @bitbaum/limitkit
 
 Rate limiting as a **decision**, not a middleware.
 
 ```bash
-pnpm add limitkit
+pnpm add @bitbaum/limitkit
 ```
 
 ## Why this exists
@@ -22,7 +22,7 @@ So the algorithm is fixed and the store is the seam.
 ## Use
 
 ```ts
-import { slidingWindow, clientIp, toHeaders } from 'limitkit';
+import { slidingWindow, clientIp, toHeaders } from '@bitbaum/limitkit';
 
 const loginLimiter = slidingWindow({ limit: 5, windowMs: 15 * 60_000 });
 
